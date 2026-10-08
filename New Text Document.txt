@@ -1,0 +1,1297 @@
+# 10. Configuring GitHub Webhooks with Jenkins on AWS EC2
+
+This lab configures **Jenkins on an Ubuntu EC2 instance** and uses a **GitHub webhook** to automatically trigger a Jenkins job whenever code is pushed to GitHub.
+
+## 1. Objective
+
+By the end of this lab:
+
+```text
+Developer
+    ↓
+git push
+    ↓
+GitHub
+    ↓
+Webhook
+    ↓
+Jenkins on EC2
+    ↓
+Jenkins Job
+    ↓
+Build automatically
+```
+
+We will **not use ngrok**, because Jenkins is running on a publicly reachable EC2 server.
+
+---
+
+# 2. Prerequisites
+
+You need:
+
+- AWS account
+- GitHub account
+- GitHub repository
+- SSH client
+- EC2 instance
+- Jenkins
+
+For this lab:
+
+```text
+OS: Ubuntu
+Jenkins Port: 8080
+GitHub Event: Push
+Jenkins Job: Freestyle Project
+```
+
+Jenkins currently requires Java 21 or later for the current Linux installation path. [Jenkins](https://www.jenkins.io/doc/book/installing/linux/?utm_source=chatgpt.com)
+
+---
+
+# 3. Create EC2 Instance
+
+Go to:
+
+```text
+AWS Console
+    ↓
+EC2
+    ↓
+Instances
+    ↓
+Launch Instance
+```
+
+### Name
+
+```text
+jenkins-server
+```
+
+### AMI
+
+Select:
+
+```text
+Ubuntu
+```
+
+Use an Ubuntu LTS release.
+
+### Instance type
+
+For a learning lab, use a small instance available to your account, such as:
+
+```text
+t3.micro
+```
+
+### Key pair
+
+Create/select a key pair:
+
+```text
+jenkins-key
+```
+
+Download the `.pem` file if creating a new key.
+
+---
+
+# 4. Configure Security Group
+
+Create a security group:
+
+```text
+jenkins-sg
+```
+
+Add these inbound rules:
+
+| Type | Port | Source | Purpose |
+|---|---:|---|---|
+| SSH | 22 | My IP | Connect to EC2 |
+| Custom TCP | 8080 | 0.0.0.0/0 | GitHub → Jenkins |
+
+For this lab, port `8080` needs to be reachable from the internet because GitHub must send the webhook request to Jenkins.
+
+> In production, you would normally put Jenkins behind HTTPS/reverse proxy or another controlled access layer rather than exposing port 8080 directly.
+
+---
+
+# 5. Launch EC2
+
+Click:
+
+```text
+Launch instance
+```
+
+Wait until:
+
+```text
+Instance state: Running
+```
+
+and:
+
+```text
+Status checks: 2/2 checks passed
+```
+
+---
+
+# 6. Get EC2 Public IP
+
+Select the instance and find:
+
+```text
+Public IPv4 address
+```
+
+Example:
+
+```text
+52.90.62.182
+```
+
+Your IP will be different.
+
+We'll refer to it as:
+
+```text
+<EC2-PUBLIC-IP>
+```
+
+---
+
+# 7. Connect to EC2
+
+From Windows PowerShell:
+
+```powershell
+ssh -i "jenkins-key.pem" ubuntu@<EC2-PUBLIC-IP>
+```
+
+Example:
+
+```powershell
+ssh -i "jenkins-key.pem" ubuntu@52.90.62.182
+```
+
+---
+
+# 8. Update Ubuntu
+
+Run:
+
+```bash
+sudo apt update
+```
+
+Then:
+
+```bash
+sudo apt upgrade -y
+```
+
+---
+
+# 9. Install Java
+
+Jenkins requires Java.
+
+Install Java 21:
+
+```bash
+sudo apt install fontconfig openjdk-21-jre -y
+```
+
+Check:
+
+```bash
+java -version
+```
+
+You should see Java 21.
+
+Jenkins' current Ubuntu installation documentation recommends Java 21 and specifically recommends installing Java before Jenkins. [Jenkins](https://www.jenkins.io/doc/book/installing/linux/?utm_source=chatgpt.com)
+
+---
+
+# 10. Install Jenkins
+
+Add the Jenkins repository key:
+
+```bash
+sudo wget -O /etc/apt/keyrings/jenkins-keyring.asc \
+  https://pkg.jenkins.io/debian-stable/jenkins.io-2026.key
+```
+
+Add the repository:
+
+```bash
+echo "deb [signed-by=/etc/apt/keyrings/jenkins-keyring.asc]" \
+  https://pkg.jenkins.io/debian-stable binary/ | sudo tee \
+  /etc/apt/sources.list.d/jenkins.list > /dev/null
+```
+
+Update packages:
+
+```bash
+sudo apt update
+```
+
+Install Jenkins:
+
+```bash
+sudo apt install jenkins -y
+```
+
+These are the current Jenkins LTS Debian/Ubuntu installation steps. [Jenkins](https://www.jenkins.io/doc/book/installing/linux/?utm_source=chatgpt.com)
+
+---
+
+# 11. Start Jenkins
+
+Enable Jenkins:
+
+```bash
+sudo systemctl enable jenkins
+```
+
+Start Jenkins:
+
+```bash
+sudo systemctl start jenkins
+```
+
+Check status:
+
+```bash
+sudo systemctl status jenkins
+```
+
+You should see:
+
+```text
+Active: active (running)
+```
+
+---
+
+# 12. If Jenkins Says "Failed to Find a Valid Java Installation"
+
+If you see:
+
+```text
+jenkins: failed to find a valid Java installation
+```
+
+check:
+
+```bash
+java -version
+```
+
+and:
+
+```bash
+which java
+```
+
+If Java is installed but Jenkins cannot find it, configure `JAVA_HOME` for the Jenkins service:
+
+```bash
+sudo systemctl edit jenkins
+```
+
+Add:
+
+```ini
+[Service]
+Environment="JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64"
+```
+
+Then:
+
+```bash
+sudo systemctl daemon-reload
+```
+
+and:
+
+```bash
+sudo systemctl restart jenkins
+```
+
+Check:
+
+```bash
+sudo systemctl status jenkins
+```
+
+---
+
+# 13. Get Jenkins Initial Password
+
+Run:
+
+```bash
+sudo cat /var/lib/jenkins/secrets/initialAdminPassword
+```
+
+Copy the password.
+
+---
+
+# 14. Open Jenkins
+
+From your Windows browser:
+
+```text
+http://<EC2-PUBLIC-IP>:8080
+```
+
+Example:
+
+```text
+http://52.90.62.182:8080
+```
+
+You should see:
+
+```text
+Unlock Jenkins
+```
+
+Paste the initial password.
+
+---
+
+# 15. Install Suggested Plugins
+
+Select:
+
+```text
+Install suggested plugins
+```
+
+Wait for installation to complete.
+
+---
+
+# 16. Create Jenkins Administrator
+
+Enter your details.
+
+Example:
+
+```text
+Username: admin
+Password: ********
+Full name: Jenkins Administrator
+Email: your-email@example.com
+```
+
+Click:
+
+```text
+Save and Continue
+```
+
+---
+
+# 17. Configure Jenkins URL
+
+Use:
+
+```text
+http://<EC2-PUBLIC-IP>:8080/
+```
+
+Example:
+
+```text
+http://52.90.62.182:8080/
+```
+
+Click:
+
+```text
+Save and Finish
+```
+
+Jenkins is now ready.
+
+---
+
+# 18. Install Git on EC2
+
+Jenkins needs Git to clone the GitHub repository.
+
+Run:
+
+```bash
+sudo apt install git -y
+```
+
+Check:
+
+```bash
+git --version
+```
+
+---
+
+# 19. Create GitHub Repository
+
+For this lab, we'll use:
+
+```text
+github-webhook-demo
+```
+
+Your repository can contain something simple such as:
+
+```text
+README.md
+```
+
+Example repository:
+
+```text
+https://github.com/<USERNAME>/github-webhook-demo
+```
+
+---
+
+# 20. Check GitHub Plugin
+
+In Jenkins:
+
+```text
+Manage Jenkins
+    ↓
+Plugins
+```
+
+Search for:
+
+```text
+GitHub
+```
+
+Make sure the GitHub plugin is installed.
+
+The Jenkins GitHub plugin supports triggering jobs from GitHub push events. [Jenkins Plugins](https://plugins.jenkins.io/github?utm_source=chatgpt.com)
+
+---
+
+# 21. Create Freestyle Job
+
+Go to:
+
+```text
+Jenkins Dashboard
+    ↓
+New Item
+```
+
+Enter:
+
+```text
+github-webhook-test
+```
+
+Select:
+
+```text
+Freestyle project
+```
+
+Click:
+
+```text
+OK
+```
+
+---
+
+# 22. Configure Source Code Management
+
+Find:
+
+```text
+Source Code Management
+```
+
+Select:
+
+```text
+Git
+```
+
+Enter your repository:
+
+```text
+https://github.com/<USERNAME>/github-webhook-demo.git
+```
+
+For example:
+
+```text
+https://github.com/Nihal106/github-webhook-demo.git
+```
+
+If the repository is public, credentials aren't required for this basic lab.
+
+---
+
+# 23. Configure Branch
+
+Under:
+
+```text
+Branches to build
+```
+
+Enter:
+
+```text
+*/main
+```
+
+If your repository uses `master`:
+
+```text
+*/master
+```
+
+---
+
+# 24. Configure Webhook Trigger
+
+Find:
+
+```text
+Build Triggers
+```
+
+Enable:
+
+```text
+☑ GitHub hook trigger for GITScm polling
+```
+
+This is the important Jenkins setting.
+
+The GitHub plugin uses this trigger to react to incoming GitHub webhook events and determine which matching jobs should run. [Jenkins Plugins](https://plugins.jenkins.io/github?utm_source=chatgpt.com)
+
+---
+
+# 25. Add Build Step
+
+Scroll to:
+
+```text
+Build
+```
+
+Click:
+
+```text
+Add build step
+```
+
+Select:
+
+```text
+Execute shell
+```
+
+Enter:
+
+```bash
+echo "================================="
+echo "GitHub Webhook Triggered Jenkins"
+echo "================================="
+
+echo "Build started"
+
+echo "Current directory:"
+pwd
+
+echo "Files in workspace:"
+ls -la
+
+echo "Build completed successfully"
+```
+
+---
+
+# 26. Save the Job
+
+Click:
+
+```text
+Save
+```
+
+You should now have:
+
+```text
+github-webhook-test
+```
+
+---
+
+# 27. Test Jenkins Manually
+
+Before testing the webhook, make sure the Jenkins job itself works.
+
+Go to:
+
+```text
+github-webhook-test
+    ↓
+Build Now
+```
+
+Jenkins should start:
+
+```text
+Build #1
+```
+
+Open:
+
+```text
+Build #1
+    ↓
+Console Output
+```
+
+You should see:
+
+```text
+Started by user
+```
+
+Then Git checkout and:
+
+```text
+GitHub Webhook Triggered Jenkins
+Build started
+```
+
+At the end:
+
+```text
+Finished: SUCCESS
+```
+
+### Why do this?
+
+We first verify:
+
+```text
+Jenkins → GitHub → Clone → Build
+```
+
+Then we test:
+
+```text
+GitHub → Webhook → Jenkins → Build
+```
+
+This makes troubleshooting easier.
+
+---
+
+# 28. Configure GitHub Webhook
+
+Now go to:
+
+```text
+GitHub Repository
+    ↓
+Settings
+    ↓
+Webhooks
+    ↓
+Add webhook
+```
+
+---
+
+# 29. Configure Payload URL
+
+This is the most important part.
+
+If your Jenkins URL is:
+
+```text
+http://52.90.62.182:8080/
+```
+
+your webhook URL is:
+
+```text
+http://52.90.62.182:8080/github-webhook/
+```
+
+### Do NOT use:
+
+```text
+http://52.90.62.182/github-webhook/
+```
+
+because that uses port `80`.
+
+### Use:
+
+```text
+http://52.90.62.182:8080/github-webhook/
+```
+
+The GitHub Jenkins plugin uses the general endpoint:
+
+```text
+<JENKINS_BASE_URL>/github-webhook/
+``` :chatgpt-content-reference{index="5"}
+
+
+---
+
+# 30. Configure Content Type
+
+Select:
+
+```text
+application/json
+```
+
+---
+
+# 31. Secret
+
+For this basic lab:
+
+```text
+Secret:
+```
+
+Leave it empty.
+
+A secret can be added later for webhook verification/security.
+
+---
+
+# 32. Select Events
+
+Select:
+
+```text
+Just the push event
+```
+
+This means:
+
+```text
+git push
+    ↓
+GitHub
+    ↓
+Webhook
+    ↓
+Jenkins
+```
+
+---
+
+# 33. Activate Webhook
+
+Make sure:
+
+```text
+☑ Active
+```
+
+is selected.
+
+Click:
+
+```text
+Add webhook
+```
+
+---
+
+# 34. Check the Webhook
+
+Go to:
+
+```text
+Settings
+    ↓
+Webhooks
+```
+
+You should see your webhook.
+
+Example:
+
+```text
+http://52.90.62.182:8080/github-webhook/
+```
+
+---
+
+# 35. Check Recent Deliveries
+
+Click your webhook.
+
+Look at:
+
+```text
+Recent Deliveries
+```
+
+GitHub will show the requests it has sent to Jenkins.
+
+A successful delivery should normally have a successful HTTP response such as:
+
+```text
+200
+```
+
+---
+
+# 36. Test With a Git Push
+
+Make a change to your project.
+
+For example, modify:
+
+```text
+README.md
+```
+
+Then:
+
+```bash
+git add .
+```
+
+```bash
+git commit -m "Test Jenkins webhook"
+```
+
+Then:
+
+```bash
+git push origin main
+```
+
+---
+
+# 37. What Happens?
+
+Now the complete flow is:
+
+```text
+Developer
+    ↓
+git push
+    ↓
+GitHub
+    ↓
+Push event
+    ↓
+GitHub Webhook
+    ↓
+EC2 Public IP : 8080
+    ↓
+Jenkins /github-webhook/
+    ↓
+Jenkins detects repository change
+    ↓
+Jenkins Job
+    ↓
+Git Checkout
+    ↓
+Build
+```
+
+---
+
+# 38. Check Jenkins
+
+Go to:
+
+```text
+Jenkins
+    ↓
+github-webhook-test
+```
+
+You should see a new build:
+
+```text
+Build #1
+Build #2
+```
+
+The new build should start automatically.
+
+You should **not** have to click:
+
+```text
+Build Now
+```
+
+---
+
+# 39. Check Console Output
+
+Open the new build:
+
+```text
+Build #2
+    ↓
+Console Output
+```
+
+You should see something similar to:
+
+```text
+Started by GitHub push
+```
+
+Then:
+
+```text
+Building in workspace
+```
+
+Then your build commands:
+
+```text
+GitHub Webhook Triggered Jenkins
+Build started
+
+Current directory:
+...
+
+Files in workspace:
+...
+
+Build completed successfully
+```
+
+Finally:
+
+```text
+Finished: SUCCESS
+```
+
+---
+
+# 40. Verify GitHub Webhook
+
+Go back to:
+
+```text
+GitHub
+    ↓
+Settings
+    ↓
+Webhooks
+    ↓
+Your webhook
+    ↓
+Recent Deliveries
+```
+
+You should now see successful deliveries.
+
+---
+
+# 41. Troubleshooting
+
+## Problem 1: GitHub says "Failed to connect to host"
+
+Check the webhook URL.
+
+It must include `8080`:
+
+```text
+http://<EC2-PUBLIC-IP>:8080/github-webhook/
+```
+
+Not:
+
+```text
+http://<EC2-PUBLIC-IP>/github-webhook/
+```
+
+---
+
+## Problem 2: Jenkins doesn't open
+
+Check:
+
+```bash
+sudo systemctl status jenkins
+```
+
+It should show:
+
+```text
+Active: active (running)
+```
+
+Then check:
+
+```bash
+sudo ss -lntp | grep 8080
+```
+
+---
+
+## Problem 3: Security Group blocking connection
+
+Check:
+
+```text
+EC2
+ ↓
+Security
+ ↓
+Security Groups
+ ↓
+Inbound Rules
+```
+
+Make sure:
+
+```text
+Custom TCP
+Port: 8080
+Source: 0.0.0.0/0
+```
+
+exists for this lab.
+
+---
+
+## Problem 4: Webhook succeeds but build doesn't start
+
+Check Jenkins:
+
+```text
+Job
+ ↓
+Configure
+ ↓
+Build Triggers
+```
+
+Make sure:
+
+```text
+☑ GitHub hook trigger for GITScm polling
+```
+
+is enabled.
+
+Also verify:
+
+```text
+Repository URL
+Branch
+```
+
+are correct.
+
+---
+
+## Problem 5: Jenkins can't clone GitHub
+
+For a public repository, verify the repository URL:
+
+```text
+https://github.com/<USERNAME>/<REPOSITORY>.git
+```
+
+For a private repository, configure appropriate GitHub credentials in Jenkins.
+
+---
+
+# 42. Important Difference: Webhook vs Credentials
+
+Don't confuse these two.
+
+### Webhook
+
+```text
+GitHub
+   ↓
+Jenkins
+```
+
+Purpose:
+
+**Tell Jenkins that an event happened.**
+
+### Git credentials
+
+```text
+Jenkins
+   ↓
+GitHub
+```
+
+Purpose:
+
+**Allow Jenkins to access the repository.**
+
+So:
+
+```text
+Webhook = Notification
+Credentials = Authentication
+```
+
+---
+
+# 43. Webhook vs Polling
+
+### Polling
+
+```text
+Jenkins → GitHub
+"Any changes?"
+
+Jenkins → GitHub
+"Any changes?"
+
+Jenkins → GitHub
+"Any changes?"
+```
+
+### Webhook
+
+```text
+Developer
+    ↓
+git push
+    ↓
+GitHub
+    ↓
+"Jenkins, there is a new push!"
+    ↓
+Jenkins
+    ↓
+Build
+```
+
+Webhooks are event-driven, so Jenkins doesn't need to repeatedly check GitHub. The GitHub plugin's trigger uses the incoming webhook event to initiate the relevant SCM check/build. [Jenkins Plugins](https://plugins.jenkins.io/github?utm_source=chatgpt.com)
+
+---
+
+# 44. Final Architecture
+
+```text
+                    INTERNET
+                       │
+                       ▼
+                 ┌───────────┐
+                 │  GitHub   │
+                 └─────┬─────┘
+                       │
+                   Push Event
+                       │
+                       ▼
+              ┌─────────────────┐
+              │ GitHub Webhook  │
+              └────────┬────────┘
+                       │
+                    HTTP POST
+                       │
+                       ▼
+              ┌─────────────────┐
+              │    AWS EC2      │
+              │                 │
+              │     Jenkins     │
+              │      :8080      │
+              └────────┬────────┘
+                       │
+                       ▼
+                 Jenkins Job
+                       │
+                       ▼
+                  Git Checkout
+                       │
+                       ▼
+                     Build
+```
+
+---
+
+# 45. Complete Lab Checklist
+
+Use this as your quick checklist:
+
+```text
+☐ Create Ubuntu EC2
+☐ Create Security Group
+☐ Open SSH 22
+☐ Open Jenkins 8080
+☐ Connect to EC2
+☐ Install Java 21
+☐ Install Jenkins
+☐ Start Jenkins
+☐ Verify Jenkins is running
+☐ Open EC2-PUBLIC-IP:8080
+☐ Complete Jenkins setup
+☐ Install Git
+☐ Verify GitHub plugin
+☐ Create Freestyle job
+☐ Configure GitHub repository
+☐ Configure main branch
+☐ Enable "GitHub hook trigger for GITScm polling"
+☐ Add Execute shell build step
+☐ Test Build Now
+☐ Go to GitHub → Settings → Webhooks
+☐ Add webhook
+☐ Use http://EC2-PUBLIC-IP:8080/github-webhook/
+☐ Select application/json
+☐ Select Push event
+☐ Activate webhook
+☐ Check Recent Deliveries
+☐ Push new code
+☐ Verify automatic Jenkins build
+☐ Check Console Output
+```
+
+### Final result
+
+The main thing you should demonstrate from this lab is:
+
+```text
+git push
+    ↓
+GitHub
+    ↓
+Webhook
+    ↓
+Jenkins on EC2
+    ↓
+Automatic Build
+```
+
+That is the core **GitHub → Jenkins webhook CI workflow**.
